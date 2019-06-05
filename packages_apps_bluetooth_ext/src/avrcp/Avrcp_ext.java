@@ -234,7 +234,6 @@ public final class Avrcp_ext {
     private final static int MESSAGE_SET_MEDIA_SESSION = 24;
     private final static int MSG_SET_AVRCP_CONNECTED_DEVICE = 25;
     private final static int MESSAGE_UPDATE_ABS_VOLUME_STATUS = 31;
-    private final static int MESSAGE_UPDATE_ABSOLUTE_VOLUME = 32;
     private static final int MSG_PLAY_STATUS_CMD_TIMEOUT = 33;
 
     private static final int STACK_CLEANUP = 0;
@@ -702,7 +701,7 @@ public final class Avrcp_ext {
         }
         @Override
         public synchronized void onPlaybackStateChanged(PlaybackState state) {
-            if (DEBUG) Log.v(TAG, "onPlaybackStateChanged: state " + state.toString());
+            if (DEBUG) Log.v(TAG, "onPlaybackStateChanged: state " + ((state != null)? state.toString() : "NULL"));
             updateCurrentMediaState(null);
             Log.v(TAG, " Exit onPlaybackStateChanged");
         }
@@ -817,19 +816,6 @@ public final class Avrcp_ext {
                     }
                 }
                 //mLastLocalVolume = -1;
-                break;
-            }
-
-           case MESSAGE_UPDATE_ABSOLUTE_VOLUME:
-            {
-                int vol = msg.arg2;
-                deviceIndex = msg.arg1;
-                Log.e(TAG, "Device switch: setting volume: " + vol);
-                if(deviceFeatures[deviceIndex].isAbsoluteVolumeSupportingDevice) {
-                    notifyVolumeChanged(vol, false);
-                } else {
-                    mAudioManager.setStreamVolume(AudioManager.STREAM_MUSIC, vol, 0);
-                }
                 break;
             }
 
@@ -1146,7 +1132,8 @@ public final class Avrcp_ext {
                     isShowUI = false;
                     deviceFeatures[deviceIndex].mInitialRemoteVolume = absVol;
                     //Avoid fluction of volume during device add in blacklist
-                    if(deviceFeatures[deviceIndex].mBlackListVolume != -1) {
+                    if(deviceFeatures[deviceIndex].mBlackListVolume != -1 &&
+                       deviceFeatures[deviceIndex].isActiveDevice) {
                         resetBlackList(address);
                         if (DEBUG) Log.v(TAG, "remote initial volume as audio stream volume : " +
                             deviceFeatures[deviceIndex].mBlackListVolume);
@@ -1160,7 +1147,7 @@ public final class Avrcp_ext {
                         break;
                     }
                     else if (mAbsVolThreshold > 0 && mAbsVolThreshold < mAudioStreamMax &&
-                        volIndex > mAbsVolThreshold) {
+                        volIndex > mAbsVolThreshold && deviceFeatures[deviceIndex].isActiveDevice) {
                         if (DEBUG) Log.v(TAG, "remote inital volume too high " + volIndex + ">" +
                             mAbsVolThreshold);
                         Message msg1 = mHandler.obtainMessage(MSG_SET_ABSOLUTE_VOLUME,
@@ -1720,7 +1707,7 @@ public final class Avrcp_ext {
                 for (int i = 0; i < maxAvrcpConnections; i++) {
                      if (i != deviceIndex && !deviceFeatures[i].isActiveDevice &&
                           deviceFeatures[i].mLastRspPlayStatus == PLAYSTATUS_PLAYING &&
-                          (state.getState() == PlaybackState.STATE_PLAYING)) {
+                          (state != null && state.getState() == PlaybackState.STATE_PLAYING)) {
                          PlaybackState.Builder playState = new PlaybackState.Builder();
                          playState.setState(PlaybackState.STATE_PAUSED,
                                           PlaybackState.PLAYBACK_POSITION_UNKNOWN, 1.0f);
@@ -2517,7 +2504,7 @@ public final class Avrcp_ext {
         }
         if (requested || ((deviceFeatures[i].mLastReportedPosition != playPositionMs) &&
              ((playPositionMs >= deviceFeatures[i].mNextPosMs) ||
-             (playPositionMs <= deviceFeatures[i].mPrevPosMs)))) {
+             (playPositionMs <= deviceFeatures[i].mPrevPosMs))) && deviceFeatures[i].isActiveDevice) {
             if (!requested) deviceFeatures[i].mPlayPosChangedNT = AvrcpConstants.NOTIFICATION_TYPE_CHANGED;
             if (deviceFeatures[i].mCurrentDevice != null)
                 registerNotificationRspPlayPosNative(deviceFeatures[i].mPlayPosChangedNT,
@@ -4269,7 +4256,7 @@ public final class Avrcp_ext {
         deviceFeatures[index].mLastLocalVolume = -1;
     }
 
-    private synchronized void onConnectionStateChanged(
+    private void onConnectionStateChanged(
             boolean rc_connected, boolean br_connected, byte[] address) {
         BluetoothDevice device = BluetoothAdapter.getDefaultAdapter().getRemoteDevice(address);
         Log.d(TAG, "onConnectionStateChanged " + rc_connected + " " + br_connected + " Addr:"
@@ -5253,11 +5240,13 @@ public final class Avrcp_ext {
             new MediaSessionManager.Callback() {
                 @Override
                 public void onMediaKeyEventDispatched(KeyEvent event, MediaSession.Token token) {
-                    // Get the package name
-                    android.media.session.MediaController controller =
-                            new android.media.session.MediaController(mContext, token);
-                    String targetPackage = controller.getPackageName();
-                    recordKeyDispatched(event, targetPackage);
+                    if (token != null) {
+                        // Get the package name
+                        android.media.session.MediaController controller =
+                                new android.media.session.MediaController(mContext, token);
+                        String targetPackage = controller.getPackageName();
+                        recordKeyDispatched(event, targetPackage);
+                    }
                 }
 
                 @Override
